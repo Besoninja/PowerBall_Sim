@@ -1,5 +1,5 @@
 import random
-import requests
+from curl_cffi import requests
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -15,11 +15,6 @@ POWER_BALLS = list(range(1, 21))
 COST_PER_GAME = 1.58  # Standard Powerball entry price per game
 
 LATEST_RESULTS_URL = "https://data.api.thelott.com/sales/vmax/web/data/lotto/latestresults"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Content-Type": "application/json",
-    "Accept": "application/json"
-}
 
 # Division labels according to official Australian Powerball rules
 TIMES_WON_LABELS = {
@@ -63,20 +58,40 @@ DIVISION_MAP = {
 # ==========================================
 @st.cache_data(ttl=1800)
 def fetch_live_powerball_data():
-    """Fetches the latest draw dividend payouts and winning numbers from The Lott API."""
+    """
+    Fetches the latest draw dividend payouts and winning numbers from The Lott API.
+    Uses curl_cffi with Chrome impersonation to bypass Akamai bot detection.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.thelott.com",
+        "Referer": "https://www.thelott.com/powerball/results",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site"
+    }
+
     payload = {
         "CompanyId": "NSWLotteries",
-        "MaxDrawCount": 1,
+        "MaxDrawCountPerProduct": 1,
         "OptionalProductFilter": ["Powerball"]
     }
+
     try:
-        res = requests.post(LATEST_RESULTS_URL, json=payload, headers=HEADERS, timeout=8)
+        res = requests.post(
+            LATEST_RESULTS_URL,
+            json=payload,
+            headers=headers,
+            impersonate="chrome120",
+            timeout=10
+        )
         res.raise_for_status()
         data = res.json()
 
         draw_results = data.get("DrawResults", [])
         if not draw_results:
-            return None
+            return {"prizes": FALLBACK_PRIZES, "live": False, "error": "No DrawResults in response"}
 
         draw = draw_results[0]
         live_prizes = FALLBACK_PRIZES.copy()
@@ -103,7 +118,9 @@ def fetch_live_powerball_data():
         }
 
 def calculate_compound_growth(weekly_spend, years=30, annual_return=0.07):
-    """Calculates cumulative lottery cost vs. compound index fund growth with monthly deposits."""
+    """
+    Calculates cumulative lottery cost vs. compound index fund growth with monthly deposits.
+    """
     monthly_contribution = weekly_spend * (52 / 12)
     monthly_rate = (1 + annual_return) ** (1 / 12) - 1
     total_months = years * 12
@@ -146,6 +163,8 @@ if live_data and live_data.get("live"):
 else:
     prize_values = FALLBACK_PRIZES
     st.sidebar.warning("Using static fallback prize payouts.")
+    if live_data and live_data.get("error"):
+        st.sidebar.caption(f"Reason: `{live_data['error']}`")
 
 col_mode, col_inputs = st.columns([1, 2])
 
@@ -284,6 +303,7 @@ if st.button('Play Games', type='primary'):
         df_standard_sorted = pd.DataFrame(list(standard_ball_frequency.items()), columns=["Ball", "Count"]).sort_values(by="Count", ascending=False)
         df_power_sorted = pd.DataFrame(list(power_ball_frequency.items()), columns=["Ball", "Count"]).sort_values(by="Count", ascending=False)
 
+        # Convert to string to prevent numerical auto-sorting
         df_standard_sorted['Ball'] = df_standard_sorted['Ball'].astype(str)
         df_power_sorted['Ball'] = df_power_sorted['Ball'].astype(str)
 
@@ -305,6 +325,7 @@ if st.button('Play Games', type='primary'):
     with tab_radial:
         st.subheader("Radial Distribution")
 
+        # Standard Balls Radar (Closed loop)
         cat_std = [str(i) for i in range(1, 36)]
         val_std = [standard_ball_frequency[i] for i in range(1, 36)]
         fig_standard = go.Figure(go.Scatterpolar(
@@ -319,6 +340,7 @@ if st.button('Play Games', type='primary'):
             title="Standard Balls (1-35)"
         )
 
+        # Powerball Radar (Closed loop)
         cat_pow = [str(i) for i in range(1, 21)]
         val_pow = [power_ball_frequency[i] for i in range(1, 21)]
         fig_power = go.Figure(go.Scatterpolar(
