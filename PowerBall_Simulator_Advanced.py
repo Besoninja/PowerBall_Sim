@@ -16,7 +16,6 @@ COST_PER_GAME = 1.58  # Standard Powerball entry price per game
 
 LATEST_RESULTS_URL = "https://data.api.thelott.com/sales/vmax/web/data/lotto/latestresults"
 
-# Division labels according to official Australian Powerball rules
 TIMES_WON_LABELS = {
     "7+P": "Div 1: 7 Balls + Powerball",
     "7":   "Div 2: 7 Balls",
@@ -54,14 +53,60 @@ DIVISION_MAP = {
 }
 
 # ==========================================
+# VISUAL BALL HELPER FUNCTION
+# ==========================================
+def render_ball_html(numbers, is_pb=False, matched=False):
+    """Generates styled circular lottery ball chips in HTML."""
+    if not isinstance(numbers, list):
+        numbers = [numbers]
+        
+    balls_html = ""
+    for num in sorted(numbers):
+        if matched and is_pb:
+            # Matched Powerball (White with Gold Ring and dark text)
+            bg_color = "#ffffff"
+            border = "3px solid #ffd700"
+            text_color = "#111111"
+        elif matched:
+            # Matched Standard Ball (Green with Gold Ring)
+            bg_color = "#38a169"
+            border = "3px solid #ffd700"
+            text_color = "#ffffff"
+        elif is_pb:
+            # Unmatched Powerball (White ball with dark text)
+            bg_color = "#ffffff"
+            border = "1px solid #cccccc"
+            text_color = "#111111"
+        else:
+            # Unmatched Standard Ball (Blue ball)
+            bg_color = "#3182ce"
+            border = "1px solid #2b6cb0"
+            text_color = "#ffffff"
+
+        balls_html += f"""
+        <div style="
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background-color: {bg_color};
+            color: {text_color};
+            border: {border};
+            font-weight: bold;
+            font-size: 15px;
+            margin: 3px;
+            box-shadow: 1px 2px 4px rgba(0,0,0,0.25);
+        ">{num}</div>
+        """
+    return balls_html
+
+# ==========================================
 # DATA FETCHING & COMPOUNDING HELPERS
 # ==========================================
 @st.cache_data(ttl=1800)
 def fetch_live_powerball_data():
-    """
-    Fetches the latest draw dividend payouts and winning numbers from The Lott API.
-    Uses curl_cffi with Chrome impersonation to bypass Akamai bot detection.
-    """
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/plain, */*",
@@ -118,9 +163,6 @@ def fetch_live_powerball_data():
         }
 
 def calculate_compound_growth(weekly_spend, years=30, annual_return=0.07):
-    """
-    Calculates cumulative lottery cost vs. compound index fund growth with monthly deposits.
-    """
     monthly_contribution = weekly_spend * (52 / 12)
     monthly_rate = (1 + annual_return) ** (1 / 12) - 1
     total_months = years * 12
@@ -151,7 +193,6 @@ def calculate_compound_growth(weekly_spend, years=30, annual_return=0.07):
 # ==========================================
 st.title("Australian PowerBall Simulator")
 
-# Retrieve live dividend figures
 live_data = fetch_live_powerball_data()
 if live_data and live_data.get("live"):
     prize_values = live_data["prizes"]
@@ -202,13 +243,17 @@ if st.button('Play Games', type='primary'):
     preselected_blues = user_blues
     preselected_pb = user_PB
 
-    for _ in range(games):
+    history_draws = []
+
+    for draw_idx in range(games):
         winning_blues = set(random.sample(BLUE_BALLS, 7))
         winning_PB = random.choice(POWER_BALLS)
 
         for wb in winning_blues:
             standard_ball_frequency[wb] += 1
         power_ball_frequency[winning_PB] += 1
+
+        draw_tickets = []
 
         for _ in range(tickets):
             if game_mode == 'QuickPick':
@@ -218,29 +263,107 @@ if st.button('Play Games', type='primary'):
                 my_blues = preselected_blues
                 my_PB = preselected_pb
 
-            blue_matches = len(my_blues.intersection(winning_blues))
+            blue_matches = my_blues.intersection(winning_blues)
             power_matches = (my_PB == winning_PB)
 
-            # Australian Powerball Division Rules
             div_key = None
-            if blue_matches == 7:
+            if len(blue_matches) == 7:
                 div_key = "7+P" if power_matches else "7"
-            elif blue_matches == 6:
+            elif len(blue_matches) == 6:
                 div_key = "6+P" if power_matches else "6"
-            elif blue_matches == 5:
+            elif len(blue_matches) == 5:
                 div_key = "5+P" if power_matches else "5"
-            elif blue_matches == 4 and power_matches:
+            elif len(blue_matches) == 4 and power_matches:
                 div_key = "4+P"
-            elif blue_matches == 3 and power_matches:
+            elif len(blue_matches) == 3 and power_matches:
                 div_key = "3+P"
-            elif blue_matches == 2 and power_matches:
+            elif len(blue_matches) == 2 and power_matches:
                 div_key = "2+P"
 
+            payout = 0.0
             if div_key:
                 times_won[div_key] += 1
-                earnings += prize_values[div_key]
+                payout = prize_values[div_key]
+                earnings += payout
 
-    # Metrics Row
+            if draw_idx < 10:
+                draw_tickets.append({
+                    "my_blues": my_blues,
+                    "my_pb": my_PB,
+                    "matched_blues": blue_matches,
+                    "matched_pb": power_matches,
+                    "div": div_key,
+                    "payout": payout
+                })
+
+        if draw_idx < 10:
+            history_draws.append({
+                "draw_num": draw_idx + 1,
+                "winning_blues": winning_blues,
+                "winning_pb": winning_PB,
+                "tickets": draw_tickets
+            })
+
+    # ==========================================
+    # DRAW RESULTS & TICKET VERIFICATION DISPLAY
+    # ==========================================
+    st.subheader("Draw Results & Ticket Verification")
+
+    container = st.container() if games == 1 else st.expander("Inspect Draw & Ticket Details (First Draws Sample)", expanded=True)
+
+    with container:
+        for d in history_draws:
+            st.markdown(f"#### Draw #{d['draw_num']}")
+            
+            winning_balls_html = render_ball_html(list(d["winning_blues"]))
+            pb_html = render_ball_html([d["winning_pb"]], is_pb=True)
+            st.markdown(
+                f"""
+                <div style="background-color: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                    <div style="font-weight: bold; margin-bottom: 6px;">Winning Numbers Drawn:</div>
+                    <div style="display: flex; align-items: center; flex-wrap: wrap;">
+                        {winning_balls_html}
+                        <span style="font-size: 20px; font-weight: bold; margin: 0 10px;">+</span>
+                        {pb_html}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            for t_idx, t in enumerate(d["tickets"][:10]):
+                matched_b = t["matched_blues"]
+                unmatched_b = t["my_blues"] - matched_b
+
+                t_matched_html = render_ball_html(list(matched_b), matched=True) if matched_b else ""
+                t_unmatched_html = render_ball_html(list(unmatched_b)) if unmatched_b else ""
+                t_pb_html = render_ball_html([t["my_pb"]], is_pb=True, matched=t["matched_pb"])
+
+                status_label = f"**{TIMES_WON_LABELS[t['div']]}** (Won ${t['payout']:,.2f})" if t["div"] else "No Win ($0.00)"
+
+                st.markdown(
+                    f"""
+                    <div style="border-left: 3px solid {'#38a169' if t['div'] else '#718096'}; padding-left: 10px; margin: 8px 0;">
+                        <span style="font-weight: 500;">Ticket #{t_idx + 1} — Result: {status_label}</span>
+                        <div style="display: flex; align-items: center; flex-wrap: wrap; margin-top: 4px;">
+                            {t_matched_html}
+                            {t_unmatched_html}
+                            <span style="font-size: 16px; margin: 0 8px;">+</span>
+                            {t_pb_html}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            if len(d["tickets"]) > 10:
+                st.caption(f"... and {len(d['tickets']) - 10} more tickets in this draw.")
+
+    st.markdown("---")
+
+    # ==========================================
+    # METRICS & VISUALIZATIONS
+    # ==========================================
     net_profit = earnings - total_spent
     st.markdown("### Simulation Summary")
     
@@ -250,7 +373,6 @@ if st.button('Play Games', type='primary'):
     m3.metric("Net Profit / Loss", f"${net_profit:,.2f}", delta=f"{net_profit:,.2f}")
     m4.metric("Return on Investment", f"{(earnings / total_spent) * 100:.2f}%" if total_spent > 0 else "0.00%")
 
-    # Payouts Table
     table_data = [
         {
             "Winning Combination": TIMES_WON_LABELS[key],
@@ -272,7 +394,6 @@ if st.button('Play Games', type='primary'):
         "text/csv"
     )
 
-    # Visualization Tabs
     tab_hist, tab_freq, tab_sorted, tab_radial, tab_opportunity = st.tabs([
         "Winnings Histogram",
         "Frequency Charts",
@@ -303,7 +424,6 @@ if st.button('Play Games', type='primary'):
         df_standard_sorted = pd.DataFrame(list(standard_ball_frequency.items()), columns=["Ball", "Count"]).sort_values(by="Count", ascending=False)
         df_power_sorted = pd.DataFrame(list(power_ball_frequency.items()), columns=["Ball", "Count"]).sort_values(by="Count", ascending=False)
 
-        # Convert to string to prevent numerical auto-sorting
         df_standard_sorted['Ball'] = df_standard_sorted['Ball'].astype(str)
         df_power_sorted['Ball'] = df_power_sorted['Ball'].astype(str)
 
@@ -325,7 +445,6 @@ if st.button('Play Games', type='primary'):
     with tab_radial:
         st.subheader("Radial Distribution")
 
-        # Standard Balls Radar (Closed loop)
         cat_std = [str(i) for i in range(1, 36)]
         val_std = [standard_ball_frequency[i] for i in range(1, 36)]
         fig_standard = go.Figure(go.Scatterpolar(
@@ -340,7 +459,6 @@ if st.button('Play Games', type='primary'):
             title="Standard Balls (1-35)"
         )
 
-        # Powerball Radar (Closed loop)
         cat_pow = [str(i) for i in range(1, 21)]
         val_pow = [power_ball_frequency[i] for i in range(1, 21)]
         fig_power = go.Figure(go.Scatterpolar(
