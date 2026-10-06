@@ -63,17 +63,17 @@ def render_ball_html(numbers, is_pb=False, matched=False):
     balls_html = ""
     for num in sorted(numbers):
         if matched and is_pb:
-            # Matched Powerball (White with Gold Ring and dark text)
+            # Matched Powerball (White ball with Gold Ring)
             bg_color = "#ffffff"
             border = "3px solid #ffd700"
             text_color = "#111111"
         elif matched:
-            # Matched Standard Ball (Green with Gold Ring)
+            # Matched Standard Ball (Green ball with Gold Ring)
             bg_color = "#38a169"
             border = "3px solid #ffd700"
             text_color = "#ffffff"
         elif is_pb:
-            # Unmatched Powerball (White ball with dark text)
+            # Unmatched Powerball (White ball)
             bg_color = "#ffffff"
             border = "1px solid #cccccc"
             text_color = "#111111"
@@ -83,23 +83,7 @@ def render_ball_html(numbers, is_pb=False, matched=False):
             border = "1px solid #2b6cb0"
             text_color = "#ffffff"
 
-        balls_html += f"""
-        <div style="
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 38px;
-            height: 38px;
-            border-radius: 50%;
-            background-color: {bg_color};
-            color: {text_color};
-            border: {border};
-            font-weight: bold;
-            font-size: 15px;
-            margin: 3px;
-            box-shadow: 1px 2px 4px rgba(0,0,0,0.25);
-        ">{num}</div>
-        """
+        balls_html += f'<div style="display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background-color: {bg_color}; color: {text_color}; border: {border}; font-weight: bold; font-size: 15px; margin: 3px; box-shadow: 1px 2px 4px rgba(0,0,0,0.25);">{num}</div>'
     return balls_html
 
 # ==========================================
@@ -309,55 +293,59 @@ if st.button('Play Games', type='primary'):
     # ==========================================
     st.subheader("Draw Results & Ticket Verification")
 
-    container = st.container() if games == 1 else st.expander("Inspect Draw & Ticket Details (First Draws Sample)", expanded=True)
+    def display_single_draw(d):
+        st.markdown(f"#### Draw #{d['draw_num']}")
+        
+        winning_balls_html = render_ball_html(list(d["winning_blues"]))
+        pb_html = render_ball_html([d["winning_pb"]], is_pb=True)
+        
+        st.markdown(
+            f'<div style="background-color: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin-bottom: 15px;">'
+            f'<div style="font-weight: bold; margin-bottom: 6px;">Winning Numbers Drawn:</div>'
+            f'<div style="display: flex; align-items: center; flex-wrap: wrap;">'
+            f'{winning_balls_html}'
+            f'<span style="font-size: 20px; font-weight: bold; margin: 0 10px; color: #ffffff;">+</span>'
+            f'{pb_html}'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
-    with container:
-        for d in history_draws:
-            st.markdown(f"#### Draw #{d['draw_num']}")
-            
-            winning_balls_html = render_ball_html(list(d["winning_blues"]))
-            pb_html = render_ball_html([d["winning_pb"]], is_pb=True)
+        for t_idx, t in enumerate(d["tickets"][:10]):
+            matched_b = t["matched_blues"]
+            unmatched_b = t["my_blues"] - matched_b
+
+            t_matched_html = render_ball_html(list(matched_b), matched=True) if matched_b else ""
+            t_unmatched_html = render_ball_html(list(unmatched_b)) if unmatched_b else ""
+            t_pb_html = render_ball_html([t["my_pb"]], is_pb=True, matched=t["matched_pb"])
+
+            status_label = f"**{TIMES_WON_LABELS[t['div']]}** (Won ${t['payout']:,.2f})" if t["div"] else "No Win ($0.00)"
+
+            border_color = "#38a169" if t["div"] else "#718096"
             st.markdown(
-                f"""
-                <div style="background-color: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin-bottom: 15px;">
-                    <div style="font-weight: bold; margin-bottom: 6px;">Winning Numbers Drawn:</div>
-                    <div style="display: flex; align-items: center; flex-wrap: wrap;">
-                        {winning_balls_html}
-                        <span style="font-size: 20px; font-weight: bold; margin: 0 10px;">+</span>
-                        {pb_html}
-                    </div>
-                </div>
-                """,
+                f'<div style="border-left: 3px solid {border_color}; padding-left: 10px; margin: 8px 0;">'
+                f'<span style="font-weight: 500;">Ticket #{t_idx + 1} — Result: {status_label}</span>'
+                f'<div style="display: flex; align-items: center; flex-wrap: wrap; margin-top: 4px;">'
+                f'{t_matched_html}'
+                f'{t_unmatched_html}'
+                f'<span style="font-size: 16px; margin: 0 8px; color: #ffffff;">+</span>'
+                f'{t_pb_html}'
+                f'</div>'
+                f'</div>',
                 unsafe_allow_html=True
             )
 
-            for t_idx, t in enumerate(d["tickets"][:10]):
-                matched_b = t["matched_blues"]
-                unmatched_b = t["my_blues"] - matched_b
+        if len(d["tickets"]) > 10:
+            st.caption(f"... and {len(d['tickets']) - 10} more tickets in this draw.")
 
-                t_matched_html = render_ball_html(list(matched_b), matched=True) if matched_b else ""
-                t_unmatched_html = render_ball_html(list(unmatched_b)) if unmatched_b else ""
-                t_pb_html = render_ball_html([t["my_pb"]], is_pb=True, matched=t["matched_pb"])
+    if history_draws:
+        display_single_draw(history_draws[0])
 
-                status_label = f"**{TIMES_WON_LABELS[t['div']]}** (Won ${t['payout']:,.2f})" if t["div"] else "No Win ($0.00)"
-
-                st.markdown(
-                    f"""
-                    <div style="border-left: 3px solid {'#38a169' if t['div'] else '#718096'}; padding-left: 10px; margin: 8px 0;">
-                        <span style="font-weight: 500;">Ticket #{t_idx + 1} — Result: {status_label}</span>
-                        <div style="display: flex; align-items: center; flex-wrap: wrap; margin-top: 4px;">
-                            {t_matched_html}
-                            {t_unmatched_html}
-                            <span style="font-size: 16px; margin: 0 8px;">+</span>
-                            {t_pb_html}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-            if len(d["tickets"]) > 10:
-                st.caption(f"... and {len(d['tickets']) - 10} more tickets in this draw.")
+    if len(history_draws) > 1:
+        with st.expander(f"View Remaining Draws ({len(history_draws) - 1} more)", expanded=False):
+            for remaining_draw in history_draws[1:]:
+                display_single_draw(remaining_draw)
+                st.markdown("---")
 
     st.markdown("---")
 
